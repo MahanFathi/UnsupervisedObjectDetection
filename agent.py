@@ -5,11 +5,14 @@ from data_util import T_SNE, sample_data
 from net import Net
 
 
-def do_plot(guided_backprops, indices, image, bounding_box, files_dict):
-    top_grads = [guided_backprops[i] for i in indices]
-    folder = list(files_dict.keys())[0]
-    name = files_dict[folder][0]
-    get_full_plot(top_grads, image, bounding_box, folder, name)
+def do_batch_plot(guided_backprops, indices, images, bounding_boxes, files_dict):
+    folders_and_names = []
+    for key, values in files_dict.items():
+        for val in values:
+            folders_and_names.append([key, val])
+    for gbps, index, image, bb, fn in zip(guided_backprops, indices, images, bounding_boxes, folders_and_names):
+        top_grads = [gbps[i] for i in index]
+        get_full_plot(top_grads, image, bb, *fn)
 
 
 class Agent(object):
@@ -23,17 +26,17 @@ class Agent(object):
 
     def get_bounding_box(self, image=None, files_dict=None):
         if image is None and files_dict is None:
-            image, files_dict = sample_data(1)
+            image, files_dict = sample_data(self.config.batch_size)
         preprocessed_image = self._preprocess(image.copy())
-        kmax_neuron_indices, top_class = self._get_kmax_neurons(preprocessed_image)
+        kmax_neuron_indices, top_classes_indices = self.net.get_top_kmax_neurons(preprocessed_image)
         guided_backprops = self._get_guided_backprops(preprocessed_image, kmax_neuron_indices)
-        masks = self._get_image_masks(guided_backprops)
-        topk_neurons_relative_indices = self._get_topk_neurons(preprocessed_image, masks, top_class)
-        bounding_box, _ = self._get_bounding_box(masks, topk_neurons_relative_indices)
+        masks = self._get_images_masks(guided_backprops)
+        top_k_neurons_relative_indices = self._get_top_k_neurons(preprocessed_image, masks, top_classes_indices)
+        bounding_boxes = self._get_all_bounding_boxes(masks, top_k_neurons_relative_indices)
         if self.config.do_plotting:
-            do_plot(guided_backprops, topk_neurons_relative_indices,
-                    image, bounding_box, files_dict)
-        return bounding_box
+            do_batch_plot(guided_backprops, top_k_neurons_relative_indices,
+                          image, bounding_boxes, files_dict)
+        return bounding_boxes
 
     def make_tsne_pic_for_directory(self, folder='personal'):
         fc_features = None
@@ -48,52 +51,49 @@ class Agent(object):
 
         tsne = T_SNE()
         tsne_embedding = tsne.generate_tsne(fc_features)
-        tsne.save_grid(images, tsne_embedding, folder+'.jpg')
+        tsne.save_grid(images, tsne_embedding, folder + '.jpg')
 
     def _preprocess(self, image):
         return self.net.vgg16.preprocess_input(image)
 
-    def _get_kmax_neurons(self, image):
-        class_scores = self.net.get_class_scores(image)
-        n = len(self.config.top_n_classes_weights)
-        top_class = np.argmax(class_scores)
-        top_classes = np.argsort(class_scores)[-n:]
-        top_scores = class_scores[top_classes]
-        activations = self.net.get_activations(image)
-
-        normalizer = 1.0 / (np.sum(self.config.top_n_classes_weights) * np.sum(top_scores))
-
-        impact_gradient = 0
-        for i, class_index in enumerate(top_classes):
-            impact_gradient_per_class = self.net.get_impact_gradient_per_class(activations=activations,
-                                                                               class_index=class_index)
-            impact_gradient += impact_gradient_per_class * top_scores[i] * \
-                               self.config.top_n_classes_weights[i] * normalizer
-
-        rank_score = activations * impact_gradient
-        kmax_neurons = np.argsort(rank_score.ravel())[-self.config.kmax:]
-        return kmax_neurons, top_class
-
-    def _get_guided_backprops(self, image, neuron_indices):
-        guided_backprops = [self.net.get_guided_backprop(image, neuron_index) for neuron_index in neuron_indices]
+    def _get_guided_backprops(self, images, neuron_indices):
+        # lazy programming, this part should as well be vectorized
+        guided_backprops = []
+        for image, neuron_index in zip(images, neuron_indices):
+            gbp = [self.net.get_guided_backprop(np.expand_dims(image, axis=0), ni)
+                   for ni in neuron_index]
+            guided_backprops.append(gbp)
         return guided_backprops
 
-    def _get_image_masks(self, guided_backprops):
-        projected_gbps = [np.max(gb, axis=-1).squeeze() for gb in guided_backprops]
-        raw_masks = [pgbp > np.percentile(pgbp, self.config.cut_off_percentile) for pgbp in projected_gbps]
-        # erosion and dilation
-        masks = [binary_dilation(binary_erosion(raw_mask)).astype(projected_gbps[0].dtype) for raw_mask in raw_masks]
+    def _get_images_masks(self, guided_backprops):
+        masks = []
+        for gbps in guided_backprops:
+            projected_gbps = [np.max(gb, axis=-1).squeeze() for gb in gbps]
+            raw_masks = [pgbp > np.percentile(pgbp, self.config.cut_off_percentile) for pgbp in projected_gbps]
+            # erosion and dilation
+            masks_per_image = [binary_dilation(binary_erosion(raw_mask)).astype(projected_gbps[0].dtype) for raw_mask in
+                               raw_masks]
+            masks.append(masks_per_image)
         return masks
 
-    def _get_topk_neurons(self, image, masks, top_class):
-        reshaped_image = image.reshape(np.roll(self.config.vgg16.input_size, 1))
-        images = np.stack([np.reshape(reshaped_image * mask, self.config.vgg16.input_size) for mask in masks])
-        losses = self.net.get_batch_loss(images, top_class)
-        return list(np.argsort(losses)[:self.config.k])
-        # return kmax_neuron_indices[np.argsort(losses)[:self.config.k]]
+    def _get_top_k_neurons(self, images, masks, top_class):
+        top_k_neurons_relative_indices = []
+        for i, image in enumerate(images):
+            reshaped_image = image.reshape(np.roll(self.config.vgg16.input_size, 1))
+            masked_images = np.stack(
+                [np.reshape(reshaped_image * mask, self.config.vgg16.input_size) for mask in masks[i]])
+            losses = self.net.get_batch_loss(masked_images, top_class[i])
+            top_k_neurons_relative_indices.append(list(np.argsort(losses)[:self.config.k]))
+        return top_k_neurons_relative_indices
+
+    def _get_all_bounding_boxes(self, all_masks, all_mask_indices):
+        bounding_boxes = []
+        for mask, mask_indices in zip(all_masks, all_mask_indices):
+            bounding_boxes.append(self._get_bounding_box(mask, mask_indices))
+        return bounding_boxes
 
     def _get_bounding_box(self, masks, mask_indices):
-        # sorry, worst piece of code mankind has ever done
+        # sorry, super lazy
         final_masks = np.array(masks)[mask_indices]
         the_mask = final_masks[0] * False
         for mask in final_masks:
@@ -108,4 +108,4 @@ class Agent(object):
                     x_min = min(x_min, j)
                     y_max = max(y_max, i)
                     x_max = max(x_max, j)
-        return [[x_min, y_min], [x_max, y_max]], the_mask
+        return [[x_min, y_min], [x_max, y_max]]
