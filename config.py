@@ -29,4 +29,6 @@ class Config(object):
     grid_size = 30
 
     # plot
+    do_plotting = True
+    gradients_plot_path = os.path.abspath(os.path.join(os.path.realpath('.'), 'results'))
     max_per_row_image_plot = 5

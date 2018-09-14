@@ -1,8 +1,15 @@
 import numpy as np
-import matplotlib.pyplot as plt
+from vis_util import get_full_plot
 from scipy.ndimage import binary_erosion, binary_dilation
 from data_util import T_SNE, sample_data
 from net import Net
+
+
+def do_plot(guided_backprops, indices, image, bounding_box, files_dict):
+    top_grads = [guided_backprops[i] for i in indices]
+    folder = list(files_dict.keys())[0]
+    name = files_dict[folder][0]
+    get_full_plot(top_grads, image, bounding_box, folder, name)
 
 
 class Agent(object):
@@ -14,30 +21,27 @@ class Agent(object):
         self.config = config
         self.net = Net(config)
 
-    def visualize(self, guided_backprops):
-        guided_backprops = guided_backprops[-self.config.max_per_row_image_plot:]
-        for i, image in enumerate(guided_backprops):
-            plt.subplot(1, min([self.config.max_per_row_image_plot, len(guided_backprops)]), i + 1)
-            plt.imshow(image.squeeze().astype('float32'))
-            plt.axis('off')
-        plt.show()
-
-    def get_bounding_box(self, image):
-        preprocessed_image = self._preprocess(image)
+    def get_bounding_box(self, image=None, files_dict=None):
+        if image is None and files_dict is None:
+            image, files_dict = sample_data(1)
+        preprocessed_image = self._preprocess(image.copy())
         kmax_neuron_indices, top_class = self._get_kmax_neurons(preprocessed_image)
         guided_backprops = self._get_guided_backprops(preprocessed_image, kmax_neuron_indices)
         masks = self._get_image_masks(guided_backprops)
         topk_neurons_relative_indices = self._get_topk_neurons(preprocessed_image, masks, top_class)
-        bounding_box = self._get_bounding_box(masks, topk_neurons_relative_indices)
+        bounding_box, _ = self._get_bounding_box(masks, topk_neurons_relative_indices)
+        if self.config.do_plotting:
+            do_plot(guided_backprops, topk_neurons_relative_indices,
+                    image, bounding_box, files_dict)
         return bounding_box
 
-    def make_tsne_pic_for_folder(self, folder='personal'):
+    def make_tsne_pic_for_directory(self, folder='personal'):
         fc_features = None
         images = None
         images_number = self.config.grid_size ** 2
         batch_count = images_number // self.config.batch_size + 1
         for i in range(batch_count):
-            image_batch = sample_data(self.config.batch_size, [folder])
+            image_batch, _ = sample_data(self.config.batch_size, [folder])
             images = image_batch if images is None else np.concatenate([images, image_batch])
             fc_features_batch = self.net.get_fc_features(image_batch)
             fc_features = fc_features_batch if fc_features is None else np.concatenate([fc_features, fc_features_batch])
@@ -89,7 +93,7 @@ class Agent(object):
         # return kmax_neuron_indices[np.argsort(losses)[:self.config.k]]
 
     def _get_bounding_box(self, masks, mask_indices):
-        # sorry, worst piece of code
+        # sorry, worst piece of code mankind has ever done
         final_masks = np.array(masks)[mask_indices]
         the_mask = final_masks[0] * False
         for mask in final_masks:
@@ -104,4 +108,4 @@ class Agent(object):
                     x_min = min(x_min, j)
                     y_max = max(y_max, i)
                     x_max = max(x_max, j)
-        return [[y_min, x_min], [y_max, x_max]], the_mask
+        return [[x_min, y_min], [x_max, y_max]], the_mask

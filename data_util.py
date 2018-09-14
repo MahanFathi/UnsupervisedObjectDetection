@@ -14,15 +14,18 @@ def sample_data(batch_size, folders=None):
     input_size = Config.vgg16.input_size if Config.resize else Config.default_size
     image_batch = np.empty([size] + list(input_size))
     allowed_folders = Config.dataset_allowed_folders if folders is None else folders
+    files_dict = {}
     index = 0
     for cat in allowed_folders:
         cat_path = os.path.join(Config.dataset_path, cat)
-        for i, img in enumerate(random.sample(os.listdir(cat_path), size_per_cat)):
+        cat_image_file_names = random.sample(os.listdir(cat_path), size_per_cat)
+        files_dict[cat] = cat_image_file_names
+        for i, img in enumerate(cat_image_file_names):
             img_path = os.path.join(cat_path, img)
             loaded_image = image.load_img(img_path, target_size=input_size)
             image_batch[index + i] = image.img_to_array(loaded_image)
         index += size_per_cat
-    return image_batch
+    return image_batch, files_dict
 
 
 class T_SNE(object):
@@ -56,5 +59,5 @@ class T_SNE(object):
             out[h_range:h_range + self.tile_res, w_range:w_range + self.tile_res] = image.img_to_array(img)
 
         im = image.array_to_img(out)
-        im.save(self.output_dir + out_name, quality=100)
+        im.save(os.path.join(self.output_dir, out_name), quality=100)
 
