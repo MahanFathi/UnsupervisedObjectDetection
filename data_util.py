@@ -8,24 +8,28 @@ from scipy.spatial.distance import cdist
 from config import Config
 
 
+def read_images(category, image_file_names):
+    cat_path = os.path.join(Config.dataset_path, category)
+    input_size = Config.vgg16.input_size
+    image_batch = np.empty([len(image_file_names)] + list(input_size))
+    for i, img in enumerate(image_file_names):
+        img_path = os.path.join(cat_path, img)
+        loaded_image = image.load_img(img_path, target_size=input_size)
+        image_batch[i] = image.img_to_array(loaded_image)
+    return image_batch
+
+
 def sample_data(batch_size, folders=None):
     size_per_cat = batch_size // len(Config.dataset_allowed_folders)
-    size = size_per_cat * len(Config.dataset_allowed_folders)
-    input_size = Config.vgg16.input_size if Config.resize else Config.default_size
-    image_batch = np.empty([size] + list(input_size))
     allowed_folders = Config.dataset_allowed_folders if folders is None else folders
     files_dict = {}
-    index = 0
+    image_batches = []
     for cat in allowed_folders:
         cat_path = os.path.join(Config.dataset_path, cat)
         cat_image_file_names = random.sample(os.listdir(cat_path), size_per_cat)
         files_dict[cat] = cat_image_file_names
-        for i, img in enumerate(cat_image_file_names):
-            img_path = os.path.join(cat_path, img)
-            loaded_image = image.load_img(img_path, target_size=input_size)
-            image_batch[index + i] = image.img_to_array(loaded_image)
-        index += size_per_cat
-    return image_batch, files_dict
+        image_batches.append(read_images(cat, cat_image_file_names))
+    return np.concatenate(image_batches), files_dict
 
 
 class T_SNE(object):
