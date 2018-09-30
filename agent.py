@@ -36,7 +36,7 @@ class Agent(object):
         if self.config.do_plotting:
             do_batch_plot(guided_backprops, top_k_neurons_relative_indices,
                           image, bounding_boxes, files_dict)
-        return bounding_boxes
+        return bounding_boxes, top_classes_indices
 
     def make_tsne_pic_for_directory(self, folder='personal'):
         fc_features = None
@@ -71,7 +71,7 @@ class Agent(object):
             projected_gbps = [np.max(gb, axis=-1).squeeze() for gb in gbps]
             raw_masks = [pgbp > np.percentile(pgbp, self.config.cut_off_percentile) for pgbp in projected_gbps]
             # erosion and dilation
-            masks_per_image = [binary_dilation(binary_erosion(raw_mask)).astype(projected_gbps[0].dtype) for raw_mask in
+            masks_per_image = [binary_erosion(binary_dilation(raw_mask)).astype(projected_gbps[0].dtype) for raw_mask in
                                raw_masks]
             masks.append(masks_per_image)
         return masks

@@ -26,9 +26,9 @@ class Config(object):
     tsne_perplexity = 30
     tsne_iter = 5000
     tsne_output_dir = os.path.abspath(os.path.join(os.path.realpath('.'), 'tsne'))
-    grid_size = 30
+    grid_size = 15
 
     # plot
-    do_plotting = True
+    do_plotting = False
     gradients_plot_path = os.path.abspath(os.path.join(os.path.realpath('.'), 'results'))
     max_per_row_image_plot = 5
