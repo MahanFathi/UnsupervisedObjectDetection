@@ -1,4 +1,4 @@
-⚠ *Disclaimer:* I am currently employed at CafeBazaar and I actively participate in the
+⚠ **Disclaimer:** I am currently employed at CafeBazaar and I actively participate in the
 interview/recruitment processes; nothing good's going to happen if we find out
 you have plagiarized this work for similar tasks. So beware!
 
